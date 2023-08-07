@@ -17,22 +17,44 @@ class GridState(Enum):
   
 Point = namedtuple('Point', 'x, y')
 
-GRID = (25, 25)
+GRID = (21, 21)
 
 class SnakeGame:
   
   def __init__(self):
     self.reset()
 
+  def create_random_snake_position_and_direction(self) -> tuple[Direction, list[Point]]:
+    direction = random.choice(list(Direction))
+    snake = []
+    if direction == Direction.RIGHT:
+      snake.append(Point(random.randint(0, GRID[0]-3), random.randint(0, GRID[1]-1)))
+      snake.append(Point(snake[0].x + 1, snake[0].y))
+      snake.append(Point(snake[0].x + 2, snake[0].y))
+    elif direction == Direction.LEFT:
+      snake.append(Point(random.randint(2, GRID[0]-1), random.randint(0, GRID[1]-1)))
+      snake.append(Point(snake[0].x - 1, snake[0].y))
+      snake.append(Point(snake[0].x - 2, snake[0].y))
+    elif direction == Direction.UP:
+      snake.append(Point(random.randint(0, GRID[0]-1), random.randint(2, GRID[1]-1)))
+      snake.append(Point(snake[0].x, snake[0].y - 1))
+      snake.append(Point(snake[0].x, snake[0].y - 2))
+    elif direction == Direction.DOWN:
+      snake.append(Point(random.randint(0, GRID[0]-1), random.randint(0, GRID[1]-3)))
+      snake.append(Point(snake[0].x, snake[0].y + 1))
+      snake.append(Point(snake[0].x, snake[0].y + 2))
+    return direction, snake
+
   def reset(self):
     # init game state
-    self.direction = Direction.RIGHT
     self.ticks_alive = 0
     
-    self.snake = [Point(GRID[0]//2 + 2, GRID[1]//2), 
-            Point(GRID[0]//2 + 1, GRID[1]//2),
-            Point(GRID[0]//2 + 0, GRID[1]//2)]
-    self.head = self.snake[0]
+    # self.direction = Direction.RIGHT
+    # self.snake = [Point(GRID[0]//2 + 2, GRID[1]//2), 
+    #         Point(GRID[0]//2 + 1, GRID[1]//2),
+    #         Point(GRID[0]//2 + 0, GRID[1]//2)]
+    self.direction, self.snake = self.create_random_snake_position_and_direction()
+    self.head = self.snake[-1]
     
     self.score = 0
     self.food = self._place_food()

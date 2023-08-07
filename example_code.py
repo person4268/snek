@@ -1,3 +1,4 @@
+# couldn't get it running but it works as a reference
 import torch
 from tensordict.nn import TensorDictModule
 from tensordict.nn.distributions import NormalParamExtractor
@@ -41,7 +42,7 @@ actor = ProbabilisticActor(
     )
 buffer = TensorDictReplayBuffer(
     LazyTensorStorage(1000), # type: ignore
-    SamplerWithoutReplacement(), # type: ignore
+    SamplerWithoutReplacement()
     )
 collector = SyncDataCollector(
     env,
@@ -63,7 +64,7 @@ for data in collector:  # collect data
                 value for key, value in loss_vals.items() if
                 key.startswith("loss")
                 )
-            loss_val.backward()
+            loss_val.backward() # type: ignore
             optim.step()
             optim.zero_grad()
-    print(f"avg reward: {data['next', 'reward'].mean().item(): 4.4f}")
+    print(f"avg reward: {data['next', 'reward'].mean().item(): 4.4f}") # type: ignore
