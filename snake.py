@@ -2,16 +2,22 @@ import random
 from enum import Enum
 from collections import namedtuple
 import hyperparams as hp
+import numpy as np
 
 class Direction(Enum):
   RIGHT = 0
   LEFT = 1
   UP = 2
   DOWN = 3
+
+class GridState(Enum):
+  EMPTY = 0
+  SNAKE = 1
+  FOOD = 2
   
 Point = namedtuple('Point', 'x, y')
 
-GRID = (20, 20)
+GRID = (25, 25)
 
 class SnakeGame:
   
@@ -30,6 +36,17 @@ class SnakeGame:
     
     self.score = 0
     self.food = self._place_food()
+    self._game_over = False
+
+  def get_state(self) -> np.ndarray:
+    grid = np.zeros(GRID)
+    grid[self.food.y, self.food.x] = GridState.FOOD.value
+    for point in self.snake:
+      # skip if out of bounds
+      if point.x < 0 or point.x >= GRID[0] or point.y < 0 or point.y >= GRID[1]:
+        continue
+      grid[point.y, point.x] = GridState.SNAKE.value
+    return grid
     
   def _place_food(self):
     x = random.randint(0, GRID[0]-1) 
@@ -38,27 +55,37 @@ class SnakeGame:
     if food in self.snake:
       self._place_food()
     return food 
-    
-  def tick(self) -> tuple[bool, int]:
+  
+  # Returns game over, whether food was collected, and score
+  def tick(self) -> tuple[bool, bool, int]:
+
+    if self._game_over:
+      return True, False, self.score
+
     # 1. move
     self._move(self.direction) # update the head
     self.snake.insert(0, self.head)
     
     self.ticks_alive += 1
 
+    food_collected = False
+
     # 2. place new food or just move
     if self.head == self.food:
       self.score += 1
       self.food = self._place_food()
+      food_collected = True
+
     else:
       self.snake.pop()
 
     # 3. check if game over
     if self._is_collision():
-      return True, self.score
+      self._game_over = True
+      return True, food_collected, self.score
     
     # 4. return game over and score
-    return False, self.score
+    return False, food_collected, self.score
   
   def change_direction(self, new_dir: Direction):
     # Annoyingly long, but simplest way to prevent going backwards as we're only really expecting one move per tick
@@ -75,7 +102,7 @@ class SnakeGame:
 
   def _is_collision(self) -> bool:
     # hits boundary
-    if self.head.x > GRID[0] or self.head.x < 0 or self.head.y > GRID[1] or self.head.y < 0:
+    if self.head.x >= GRID[0] or self.head.x < 0 or self.head.y >= GRID[1] or self.head.y < 0:
       return True
     # hits itself
     if self.head in self.snake[1:]:
@@ -99,6 +126,3 @@ class SnakeGame:
       raise ValueError
       
     self.head = Point(x, y)
-
-  def calc_reward(self) -> float:
-    return hp.REWARD_MULTIPLIER_TIME_ALIVE * self.ticks_alive + hp.REWARD_MULTIPLIER_POINTS * self.score

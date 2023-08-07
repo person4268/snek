@@ -41,7 +41,7 @@ class SnakeRenderer():
       font_size = 20
       margin = 5
       font = pygame.font.SysFont(pygame.font.get_default_font(), font_size)
-      text = font.render(f'S: {game.score}, T: {game.ticks_alive} R: {game.calc_reward()}', True, (255, 255, 255))
+      text = font.render(f'S: {game.score}, T: {game.ticks_alive}', True, (255, 255, 255))
       self.screen.blit(text, (x_start + margin, y_start + self.snake_game_height - font_size - margin))
 
       # Draw border between games (ngl there might be an off by one error somewhere)

@@ -1,0 +1,5 @@
+# hopefully this is enough
+torch
+pygame
+torchrl
+gymnasium
