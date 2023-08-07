@@ -13,15 +13,20 @@ class SnakeRenderer():
     self.snake_game_height = snake.GRID[1] * SCALE
     # How many games we have (horizontally)
     self.snake_game_count = math.ceil(math.sqrt(num_snakes))
-
-    pygame.init()
-    pygame.display.set_caption(f'{num_snakes} Snake Game' + ('s' if num_snakes > 1 else '') + ". Sure hope you like snakes.")
+    self.num_snakes = num_snakes
+    self._has_inited = False
     
     # How many pixels wide to make the viewport
-    scale = SCALE * self.snake_game_count
-    self.screen = pygame.display.set_mode((int(snake.GRID[0]*scale), int(snake.GRID[1]*scale)))
+    self.scale = SCALE * self.snake_game_count
 
   def render(self, games: list[snake.SnakeGame]):
+    # Don't create a window until the first time we try and render
+    if not self._has_inited:
+      pygame.init()
+      pygame.display.set_caption(f'{self.num_snakes} Snake Game' + ('s' if self.num_snakes > 1 else '') + ". Sure hope you like snakes.")
+      self.screen = pygame.display.set_mode((int(snake.GRID[0]*self.scale), int(snake.GRID[1]*self.scale)))
+      self._has_inited = True
+
     self.screen.fill((0,0,0))
     assert len(games) <= self.snake_game_count**2, f"Too many games! {len(games)} > {self.snake_game_count**2}"
     for i, game in enumerate(games):
@@ -53,3 +58,26 @@ class SnakeRenderer():
                          (x_start, y_start)], # BL to TL
                          1)
     pygame.display.flip()
+
+
+if __name__ == "__main__":
+  game = snake.SnakeGame()
+  renderer = SnakeRenderer(1)
+
+  while True:
+    renderer.render([game])
+    for event in pygame.event.get():
+      if event.type == pygame.KEYDOWN:
+        if event.key == pygame.K_UP:
+          game.change_direction(snake.Direction.UP)
+        elif event.key == pygame.K_DOWN:
+          game.change_direction(snake.Direction.DOWN)
+        elif event.key == pygame.K_LEFT:
+          game.change_direction(snake.Direction.LEFT)
+        elif event.key == pygame.K_RIGHT:
+          game.change_direction(snake.Direction.RIGHT)
+
+    game_over, food_collected, score = game.tick()
+    if game_over:
+      game.reset()
+    pygame.time.wait(100)

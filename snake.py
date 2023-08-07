@@ -27,22 +27,26 @@ class SnakeGame:
   def create_random_snake_position_and_direction(self) -> tuple[Direction, list[Point]]:
     direction = random.choice(list(Direction))
     snake = []
-    if direction == Direction.RIGHT:
-      snake.append(Point(random.randint(0, GRID[0]-3), random.randint(0, GRID[1]-1)))
-      snake.append(Point(snake[0].x + 1, snake[0].y))
-      snake.append(Point(snake[0].x + 2, snake[0].y))
-    elif direction == Direction.LEFT:
-      snake.append(Point(random.randint(2, GRID[0]-1), random.randint(0, GRID[1]-1)))
-      snake.append(Point(snake[0].x - 1, snake[0].y))
-      snake.append(Point(snake[0].x - 2, snake[0].y))
-    elif direction == Direction.UP:
-      snake.append(Point(random.randint(0, GRID[0]-1), random.randint(2, GRID[1]-1)))
-      snake.append(Point(snake[0].x, snake[0].y - 1))
-      snake.append(Point(snake[0].x, snake[0].y - 2))
+    direction = random.choice(list(Direction))
+    x = random.randint(4, GRID[0]-4)
+    y = random.randint(4, GRID[1]-4)
+    snake.append(Point(x, y))
+    
+    if direction == Direction.UP:
+        snake.append(Point(x, y+1))
+        snake.append(Point(x, y+2))
     elif direction == Direction.DOWN:
-      snake.append(Point(random.randint(0, GRID[0]-1), random.randint(0, GRID[1]-3)))
-      snake.append(Point(snake[0].x, snake[0].y + 1))
-      snake.append(Point(snake[0].x, snake[0].y + 2))
+        snake.append(Point(x, y-1))
+        snake.append(Point(x, y-2))
+    elif direction == Direction.LEFT:
+        snake.append(Point(x+1, y))
+        snake.append(Point(x+2, y))
+    elif direction == Direction.RIGHT:
+        snake.append(Point(x-1, y))
+        snake.append(Point(x-2, y))
+    
+    print(direction, snake)
+
     return direction, snake
 
   def reset(self):
@@ -54,7 +58,7 @@ class SnakeGame:
     #         Point(GRID[0]//2 + 1, GRID[1]//2),
     #         Point(GRID[0]//2 + 0, GRID[1]//2)]
     self.direction, self.snake = self.create_random_snake_position_and_direction()
-    self.head = self.snake[-1]
+    self.head = self.snake[0]
     
     self.score = 0
     self.food = self._place_food()
