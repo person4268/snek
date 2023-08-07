@@ -109,10 +109,9 @@ class SnakeCNNActor(nn.Module):
     )
 
     self.linear_layers = nn.Sequential(
-      # 128 filters * image dims shrunk 2x by 1 maxpool layer
-      nn.Linear(128 * (snake.GRID[0] // 2) * (snake.GRID[1] // 2), 512), nn.ReLU(),
-      nn.Linear(512, 512), nn.ReLU(),
-      nn.Linear(512, 4),
+      nn.LazyLinear(512), nn.ReLU(),
+      nn.LazyLinear(512), nn.ReLU(),
+      nn.LazyLinear(4),
     )
 
   def forward(self, x: torch.Tensor):
@@ -137,10 +136,9 @@ class SnakeCNNCritic(nn.Module):
     )
 
     self.linear_layers = nn.Sequential(
-      # 128 filters * image dims shrunk 2x by 1 maxpool layer
-      nn.Linear(128 * (snake.GRID[0] // 2) * (snake.GRID[1] // 2), 512), nn.ReLU(),
-      nn.Linear(512, 512), nn.ReLU(),
-      nn.Linear(512, 1),
+      nn.LazyLinear(512), nn.ReLU(),
+      nn.LazyLinear(512), nn.ReLU(),
+      nn.LazyLinear(1),
     )
 
   def forward(self, x):
@@ -153,7 +151,7 @@ class SnakeCNNCritic(nn.Module):
 model = TensorDictModule(
   SnakeCNNActor(),
   in_keys = ["observation"],
-  out_keys = ["right", "left", "up", "down"],
+  out_keys = ["logits"],
 )
 
 critic = ValueOperator(
@@ -161,12 +159,6 @@ critic = ValueOperator(
   in_keys = ["observation"],
 )
 
-actor = ProbabilisticActor(
-  model,
-  in_keys=["right", "left", "up", "down"],
-  distribution_class=OneHotCategorical,
-  return_log_prob=True
-)
 
 # the lengths i'll go to for autocomplete
 print("calculating normalization constants lmao")
@@ -176,6 +168,13 @@ print("Done.")
 
 check_env_specs(env)
 
+actor = ProbabilisticActor(
+  model,
+  spec=env.action_spec,
+  in_keys=["logits"],
+  distribution_class=OneHotCategorical,
+  return_log_prob=True
+)
 
 print("normalization constant shape:", env.transform[0].loc.shape) # type: ignore
 
