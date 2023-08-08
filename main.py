@@ -66,7 +66,7 @@ class SnakeEnv(gym.Env):
     # self.timer.tick(60)
     # renderer.render([self.snake])
     # obs (scaled to 1), reward, terminated, truncated, info
-    return self.snake.get_state() / 2, reward, game_over, timeout, None
+    return self.snake.get_state() / 3, reward, game_over, timeout, None
 
   def reset(self, seed: int | None = None, options = None,):
     self.snake.reset()
@@ -90,7 +90,7 @@ env = TransformedEnv(
     base_env,
     Compose(
         # normalize observations
-        ObservationNorm(in_keys=["observation"], standard_normal=True),
+        ObservationNorm(in_keys=["observation"]),
         DoubleToFloat(
             in_keys=["observation"],
         ),
@@ -113,9 +113,9 @@ class SnakeCNNActor(nn.Module):
 
     self.cnn_layers = nn.Sequential(
       nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
-      nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
       nn.MaxPool2d(kernel_size=2, stride=2),
-      nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
     )
 
     self.linear_layers = nn.Sequential(
@@ -147,9 +147,9 @@ class SnakeCNNCritic(nn.Module):
 
     self.cnn_layers = nn.Sequential(
       nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
-      nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
       nn.MaxPool2d(kernel_size=2, stride=2),
-      nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
     )
 
     self.linear_layers = nn.Sequential(

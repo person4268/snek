@@ -14,6 +14,7 @@ class GridState(Enum):
   EMPTY = 0
   SNAKE = 1
   FOOD = 2
+  HEAD = 3
   
 Point = namedtuple('Point', 'x, y')
 
@@ -65,13 +66,16 @@ class SnakeGame:
     self._game_over = False
 
   def get_state(self) -> np.ndarray:
-    grid = np.zeros(GRID)
-    grid[self.food.y, self.food.x] = GridState.FOOD.value
+    grid = np.zeros(shape=GRID, dtype=np.float16)
+    grid[self.food.x][self.food.y] = GridState.FOOD.value
     for point in self.snake:
       # skip if out of bounds
       if point.x < 0 or point.x >= GRID[0] or point.y < 0 or point.y >= GRID[1]:
         continue
-      grid[point.y, point.x] = GridState.SNAKE.value
+      grid[point.x][point.y] = GridState.SNAKE.value
+    if self.head.x < 0 or self.head.x >= GRID[0] or self.head.y < 0 or self.head.y >= GRID[1]:
+        return grid
+    grid[self.head.x][self.head.y] = GridState.HEAD.value
     return grid
     
   def _place_food(self):
