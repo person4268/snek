@@ -90,7 +90,7 @@ env = TransformedEnv(
     base_env,
     Compose(
         # normalize observations
-        ObservationNorm(in_keys=["observation"]),
+        # ObservationNorm(in_keys=["observation"]),
         DoubleToFloat(
             in_keys=["observation"],
         ),
@@ -101,8 +101,8 @@ env = TransformedEnv(
 
 # the lengths i'll go to for autocomplete
 print("calculating normalization constants lmao")
-typing.cast(ObservationNorm, typing.cast(Compose, env.transform)[0])\
-  .init_stats(num_iter=7000, reduce_dim=0, cat_dim=0)
+# typing.cast(ObservationNorm, typing.cast(Compose, env.transform)[0])\
+#   .init_stats(num_iter=10000, reduce_dim=0, cat_dim=0)
 print("Done.")
 
 check_env_specs(env)
@@ -112,14 +112,15 @@ class SnakeCNNActor(nn.Module):
     super(SnakeCNNActor, self).__init__()
 
     self.cnn_layers = nn.Sequential(
-      nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      nn.Conv2d(1, 32, kernel_size=8, stride=4, padding=1, device=device), nn.ReLU(),
       nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
-      nn.MaxPool2d(kernel_size=2, stride=2),
-      nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      # nn.MaxPool2d(kernel_size=2, stride=2),
+      nn.LazyConv2d(128, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      # nn.MaxPool2d(kernel_size=2, stride=2),
     )
 
     self.linear_layers = nn.Sequential(
-      nn.LazyLinear(256, device=device), nn.ReLU(),
+      # nn.LazyLinear(512, device=device), nn.ReLU(),
       nn.LazyLinear(256, device=device), nn.ReLU(),
       nn.LazyLinear(4, device=device),
     )
@@ -146,14 +147,15 @@ class SnakeCNNCritic(nn.Module):
     super(SnakeCNNCritic, self).__init__()
 
     self.cnn_layers = nn.Sequential(
-      nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      nn.Conv2d(1, 32, kernel_size=8, stride=4, padding=1, device=device), nn.ReLU(),
       nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
-      nn.MaxPool2d(kernel_size=2, stride=2),
-      nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      # nn.MaxPool2d(kernel_size=2, stride=2),
+      nn.LazyConv2d(128, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      # nn.MaxPool2d(kernel_size=2, stride=2),
     )
 
     self.linear_layers = nn.Sequential(
-      nn.LazyLinear(256, device=device), nn.ReLU(),
+      # nn.LazyLinear(512, device=device), nn.ReLU(),
       nn.LazyLinear(256, device=device), nn.ReLU(),
       nn.LazyLinear(1, device=device),
     )

@@ -18,7 +18,7 @@ class GridState(Enum):
   
 Point = namedtuple('Point', 'x, y')
 
-GRID = (21, 21)
+GRID = (80, 80)
 
 class SnakeGame:
   
