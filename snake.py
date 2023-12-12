@@ -66,7 +66,7 @@ class SnakeGame:
     self._game_over = False
 
   def get_state(self) -> np.ndarray:
-    grid = np.zeros(shape=GRID, dtype=np.float16)
+    grid = np.zeros(shape=GRID, dtype=np.float64)
     grid[self.food.x][self.food.y] = GridState.FOOD.value
     for point in self.snake:
       # skip if out of bounds

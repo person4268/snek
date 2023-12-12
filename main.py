@@ -35,7 +35,7 @@ from torchrl.objectives import ClipPPOLoss
 from torchrl.objectives.value import GAE
 from tqdm import tqdm
 
-device = "cpu" if not torch.backends.cuda.is_built() else "cuda:0"
+device = "cpu"
 
 # Hack: pygame Surface can't be pickled so we can't store a reference to it inside the class
 renderer = snakerenderer.SnakeRenderer(1)
@@ -70,7 +70,7 @@ class SnakeEnv(gym.Env):
 
   def reset(self, seed: int | None = None, options = None,):
     self.snake.reset()
-    return self.snake.get_state()
+    return self.snake.get_state(), None
   
   def render(self, mode='human'):
     # renderer.render([self.snake])
@@ -91,9 +91,6 @@ env = TransformedEnv(
     Compose(
         # normalize observations
         # ObservationNorm(in_keys=["observation"]),
-        DoubleToFloat(
-            in_keys=["observation"],
-        ),
         StepCounter(),
     ),
 )
@@ -111,15 +108,13 @@ class SnakeCNNActor(nn.Module):
   def __init__(self):
     super(SnakeCNNActor, self).__init__()
 
-    self.cnn_layers = nn.Sequential(
-      nn.Conv2d(1, 32, kernel_size=8, stride=4, padding=1, device=device), nn.ReLU(),
-      nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+    self.layers = nn.Sequential(
+      nn.Conv2d(1, 32, kernel_size=8, stride=4, padding=1, device=device), nn.LeakyReLU(inplace=True),
+      nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.LeakyReLU(inplace=True),
       # nn.MaxPool2d(kernel_size=2, stride=2),
-      nn.LazyConv2d(128, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
+      nn.LazyConv2d(128, kernel_size=3, stride=1, padding=1, device=device), nn.LeakyReLU(inplace=True),
       # nn.MaxPool2d(kernel_size=2, stride=2),
-    )
-
-    self.linear_layers = nn.Sequential(
+      nn.Flatten(),
       # nn.LazyLinear(512, device=device), nn.ReLU(),
       nn.LazyLinear(256, device=device), nn.ReLU(),
       nn.LazyLinear(4, device=device),
@@ -133,12 +128,7 @@ class SnakeCNNActor(nn.Module):
     else:
       x = x.permute(0, 3, 1, 2)
       batched = True
-    x = self.cnn_layers(x)
-    if not batched:
-      x = x.flatten()
-    else:
-      x = x.flatten(start_dim=1)
-    x = self.linear_layers(x)
+    x = self.layers(x)
     return x
   
 
@@ -149,7 +139,7 @@ class SnakeCNNCritic(nn.Module):
     self.cnn_layers = nn.Sequential(
       nn.Conv2d(1, 32, kernel_size=8, stride=4, padding=1, device=device), nn.ReLU(),
       nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
-      # nn.MaxPool2d(kernel_size=2, stride=2),
+      # nn.MaxPool2d(kerHIP_LAUNCH_BLOCKING=1.nel_size=2, stride=2),
       nn.LazyConv2d(128, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
       # nn.MaxPool2d(kernel_size=2, stride=2),
     )
@@ -257,7 +247,7 @@ for batch_num, tensordict_data in enumerate(collector):
     with torch.no_grad():
       advantage_module(tensordict_data)
 
-    # i think this flattens the data, idk why they didn't just use .flatten
+    # i think this flattens the data, idk why they didn't just use .flatten edit: probably because of batching
     data_view = tensordict_data.reshape(-1)
     replay_buffer.extend(data_view.cpu()) # type: ignore , why pytorch why
     for _ in range(hyp.frames_per_batch // hyp.sub_batch_size):

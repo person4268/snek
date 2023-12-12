@@ -14,7 +14,7 @@ total_frames=1_000_000
 lr = 1e-3
 max_grad_norm = 1.0
 
-sub_batch_size = 4  # cardinality of the sub-samples gathered from the current data in the inner loop
+sub_batch_size = 16  # cardinality of the sub-samples gathered from the current data in the inner loop
 num_epochs = 10  # optimisation steps per batch of data collected
 clip_epsilon = (
     0.2  # clip value for PPO loss: see the equation in the intro for more context.
