@@ -11,14 +11,14 @@ class Direction(Enum):
   DOWN = 3
 
 class GridState(Enum):
-  EMPTY = 0
-  SNAKE = 1
-  FOOD = 2
-  HEAD = 3
+  EMPTY = 2
+  SNAKE = 0
+  FOOD = 4
+  HEAD = 1
   
 Point = namedtuple('Point', 'x, y')
 
-GRID = (80, 80)
+GRID = (15, 15)
 
 class SnakeGame:
   
@@ -63,11 +63,15 @@ class SnakeGame:
     
     self.score = 0
     self.food = self._place_food()
+    self.food2 = self._place_food()
+    self.food3 = self._place_food()
     self._game_over = False
 
   def get_state(self) -> np.ndarray:
-    grid = np.zeros(shape=GRID, dtype=np.float64)
+    grid = np.zeros(shape=GRID, dtype=np.float16)
     grid[self.food.x][self.food.y] = GridState.FOOD.value
+    grid[self.food2.x][self.food2.y] = GridState.FOOD.value
+    grid[self.food3.x][self.food3.y] = GridState.FOOD.value
     for point in self.snake:
       # skip if out of bounds
       if point.x < 0 or point.x >= GRID[0] or point.y < 0 or point.y >= GRID[1]:
@@ -106,7 +110,17 @@ class SnakeGame:
       self.food = self._place_food()
       food_collected = True
 
-    else:
+    if self.head == self.food2:
+      self.score += 1
+      self.food2 = self._place_food()
+      food_collected = True
+
+    if self.head == self.food3:
+      self.score += 1
+      self.food3 = self._place_food()
+      food_collected = True
+
+    if not food_collected:
       self.snake.pop()
 
     # 3. check if game over

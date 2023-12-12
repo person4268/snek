@@ -19,7 +19,7 @@ class SnakeRenderer():
     # How many pixels wide to make the viewport
     self.scale = SCALE * self.snake_game_count
 
-  def render(self, games: list[snake.SnakeGame]):
+  def render(self, games: list[snake.SnakeGame], extra_text: str = ""):
     # Don't create a window until the first time we try and render
     if not self._has_inited:
       pygame.init()
@@ -41,12 +41,15 @@ class SnakeRenderer():
 
       # Draw the food
       pygame.draw.rect(self.screen, (0, 255, 0), (x_start + game.food.x*SCALE, y_start + game.food.y*SCALE, SCALE, SCALE))
+      pygame.draw.rect(self.screen, (0, 255, 0), (x_start + game.food2.x*SCALE, y_start + game.food2.y*SCALE, SCALE, SCALE))
+      pygame.draw.rect(self.screen, (0, 255, 0), (x_start + game.food3.x*SCALE, y_start + game.food3.y*SCALE, SCALE, SCALE))
+
 
       # Display score and # of ticks alive
       font_size = 20
       margin = 5
       font = pygame.font.SysFont(pygame.font.get_default_font(), font_size)
-      text = font.render(f'S: {game.score}, T: {game.ticks_alive}', True, (255, 255, 255))
+      text = font.render(f'S: {game.score}, T: {game.ticks_alive} {extra_text}', True, (255, 255, 255))
       self.screen.blit(text, (x_start + margin, y_start + self.snake_game_height - font_size - margin))
 
       # Draw border between games (ngl there might be an off by one error somewhere)

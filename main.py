@@ -1,41 +1,29 @@
+import random
 import snake
 import snakerenderer
 import gymnasium as gym
 import numpy as np
 import typing
+from itertools import count
 import pygame
 import math
 from gymnasium import spaces
 from gymnasium.envs.registration import register
 import hyperparams as hyp
 
-from collections import defaultdict
+from collections import defaultdict, deque, namedtuple
+
+import matplotlib
+import matplotlib.pyplot as plt
 
 import torch
-from tensordict.nn import TensorDictModule
-from tensordict.nn.distributions import OneHotCategorical
-from torch.utils.tensorboard.writer import SummaryWriter
-from torch import nn
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
 
-from torchrl.collectors import SyncDataCollector
-from torchrl.data.replay_buffers import ReplayBuffer
-from torchrl.data.replay_buffers.samplers import SamplerWithoutReplacement
-from torchrl.data.replay_buffers.storages import LazyTensorStorage
-from torchrl.envs import (
-    Compose,
-    DoubleToFloat,
-    ObservationNorm,
-    StepCounter,
-    TransformedEnv,
-)
-from torchrl.envs.libs.gym import GymEnv
-from torchrl.envs.utils import check_env_specs, ExplorationType, set_exploration_type
-from torchrl.modules import ProbabilisticActor, ValueOperator
-from torchrl.objectives import ClipPPOLoss
-from torchrl.objectives.value import GAE
-from tqdm import tqdm
 
-device = "cpu"
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+# device = torch.device("cpu")
 
 # Hack: pygame Surface can't be pickled so we can't store a reference to it inside the class
 renderer = snakerenderer.SnakeRenderer(1)
@@ -47,12 +35,18 @@ class SnakeEnv(gym.Env):
   def __init__(self):
     super(SnakeEnv, self).__init__()
     self.snake = snake.SnakeGame()
+    self.sample_random_amt = 0
+    self.sample_model_amt = 0
+    self.last_rew = 0
     self.timer = pygame.time.Clock()
     # Right, left, up, down
     self.action_space = spaces.Discrete(4)
     self.observation_space = spaces.Box(low=0, high=1,
-                                        shape=snake.GRID, dtype=np.float16)
+                                        shape=(1, snake.GRID[0], snake.GRID[1]), dtype=np.float16)
     self.reward_range = (-float(hyp.PEN_DEATH), math.inf)
+
+  def calc_food_dist(self, food: snake.Point) -> float:
+    return math.sqrt((food.x - self.snake.head.x)**2 + (food.y - self.snake.head.y)**2)
 
   def step(self, action: int):
     self.snake.change_direction(snake.Direction(action))
@@ -60,20 +54,29 @@ class SnakeEnv(gym.Env):
     timeout = self.snake.ticks_alive > hyp.MAX_TICKS_ALIVE
     reward = 0
     reward += int(food_collected) * hyp.REW_FOOD
+    reward += 1 / (self.calc_food_dist(self.snake.food) *  hyp.FOOD_DIST_AWARD + 1)
+    reward += 1 / (self.calc_food_dist(self.snake.food2) * hyp.FOOD_DIST_AWARD + 1)
+    reward += 1 / (self.calc_food_dist(self.snake.food3) * hyp.FOOD_DIST_AWARD + 1)
     reward += hyp.REW_ALIVE
     reward -= hyp.PEN_DEATH * int(game_over)
     reward -= hyp.PEN_TIMEOUT * int(timeout)
+    self.last_rew = reward
     # self.timer.tick(60)
-    # renderer.render([self.snake])
+    self.render()
     # obs (scaled to 1), reward, terminated, truncated, info
-    return self.snake.get_state() / 3, reward, game_over, timeout, None
+    return np.expand_dims(self.snake.get_state() / 3, axis=0), reward, game_over, timeout, {}
 
   def reset(self, seed: int | None = None, options = None,):
     self.snake.reset()
-    return self.snake.get_state(), None
+    self.sample_random_amt = 0
+    self.sample_model_amt = 0
+    return np.expand_dims(self.snake.get_state() / 3, axis=0), {}
   
   def render(self, mode='human'):
-    # renderer.render([self.snake])
+    amt = 0
+    if self.sample_model_amt + self.sample_random_amt != 0:
+      amt = self.sample_random_amt / (self.sample_random_amt + self.sample_model_amt)
+    renderer.render([self.snake], f" %R: {amt:.2f} REW: {self.last_rew:.2f}")
     pass
 
 register(
@@ -82,225 +85,220 @@ register(
      max_episode_steps=None,
 )
 
+env = gym.make("snake")
 
-base_env = GymEnv("snake",
-                   #render_mode="human",
-                   device=device)
-env = TransformedEnv(
-    base_env,
-    Compose(
-        # normalize observations
-        # ObservationNorm(in_keys=["observation"]),
-        StepCounter(),
-    ),
-)
+plt.ion()
+
+Transition = namedtuple('Transition',
+                        ('state', 'action', 'next_state', 'reward'))
+
+class ReplayMemory(object):
+
+    def __init__(self, capacity):
+        self.memory = deque([], maxlen=capacity)
+
+    def push(self, *args):
+        """Save a transition"""
+        self.memory.append(Transition(*args))
+
+    def sample(self, batch_size):
+        return random.sample(self.memory, batch_size)
+
+    def __len__(self):
+        return len(self.memory)
+    
+class DQN(nn.Module):
+
+    def __init__(self, n_observations, n_actions):
+        super(DQN, self).__init__()
+        self.conv = nn.Conv2d(1, 32, kernel_size=4, stride=1, padding=2, device=device)
+        self.conv2 = nn.Conv2d(32, 16, kernel_size=4, stride=1, padding=2, device=device)
+        self.layer1 = nn.Linear(17 * 17 * 16, 128)
+        self.layer2 = nn.Sequential(
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+            nn.Linear(128, 128),
+            nn.ReLU(),
+        )
+        self.layer3 = nn.Linear(128, n_actions)
+
+    # Called with either one element to determine next action, or a batch
+    # during optimization. Returns tensor([[left0exp,right0exp]...]).
+    def forward(self, x):
+        x = F.relu(self.conv(x))
+        x = F.relu(self.conv2(x))
+        x = x.view(x.size(0), -1)
+        x = F.relu(self.layer1(x))
+        x = F.relu(self.layer2(x))
+        return self.layer3(x)
+
+# BATCH_SIZE number of transitions sampled from the replay buffer
+BATCH_SIZE = 128
+# should be a constant between :math:`0` and :math:`1`
+# that ensures the sum converges. A lower :math:`\gamma` makes 
+# rewards from the uncertain far future less important for our agent 
+# than the ones in the near future that it can be fairly confident 
+# about. It also encourages agents to collect reward closer in time 
+# than equivalent rewards that are temporally far away in the future.
+GAMMA = 0.99
+# starting value of epsilon
+EPS_START = 0.9
+# final value of epsilon
+EPS_END = 0.05
+# rate of exponential decay of epsilon, higher means a slower decay
+EPS_DECAY = 2000
+# update rate of the target network
+TAU = 0.006
+# learning rate of the ``AdamW`` optimizer
+LR = 1e-4
+
+n_actions = env.action_space.n # type: ignore
+print(f"obs space shappe {env.observation_space.shape}")
+# Get the number of state observations
+state, info = env.reset()
+n_observations = len(state)
+
+policy_net = DQN(n_observations, n_actions).to(device)
+
+target_net = DQN(n_observations, n_actions).to(device)
+target_net.load_state_dict(policy_net.state_dict())
+
+optimizer = optim.AdamW(policy_net.parameters(), lr=LR, amsgrad=True)
+memory = ReplayMemory(10000)
+
+steps_done = 0
 
 
-# the lengths i'll go to for autocomplete
-print("calculating normalization constants lmao")
-# typing.cast(ObservationNorm, typing.cast(Compose, env.transform)[0])\
-#   .init_stats(num_iter=10000, reduce_dim=0, cat_dim=0)
-print("Done.")
-
-check_env_specs(env)
-
-class SnakeCNNActor(nn.Module):
-  def __init__(self):
-    super(SnakeCNNActor, self).__init__()
-
-    self.layers = nn.Sequential(
-      nn.Conv2d(1, 32, kernel_size=8, stride=4, padding=1, device=device), nn.LeakyReLU(inplace=True),
-      nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.LeakyReLU(inplace=True),
-      # nn.MaxPool2d(kernel_size=2, stride=2),
-      nn.LazyConv2d(128, kernel_size=3, stride=1, padding=1, device=device), nn.LeakyReLU(inplace=True),
-      # nn.MaxPool2d(kernel_size=2, stride=2),
-      nn.Flatten(),
-      # nn.LazyLinear(512, device=device), nn.ReLU(),
-      nn.LazyLinear(256, device=device), nn.ReLU(),
-      nn.LazyLinear(4, device=device),
-    )
-
-  def forward(self, x):
-    x = x.unsqueeze(-1)
-    batched = False
-    if len(x.shape) == 3:
-      x = x.permute(2, 0, 1)
+def select_action(state):
+    global steps_done
+    sample = random.random()
+    eps_threshold = EPS_END + (EPS_START - EPS_END) * \
+        math.exp(-1. * steps_done / EPS_DECAY)
+    steps_done += 1
+    if sample > eps_threshold:
+        with torch.no_grad():
+            # t.max(1) will return the largest column value of each row.
+            # second column on max result is index of where max element was
+            # found, so we pick action with the larger expected reward.
+            logits: torch.Tensor = policy_net(state)
+            sample = logits.max(1).indices.view(1, 1)
+            env.unwrapped.sample_model_amt += 1 # type: ignore
+            return sample
     else:
-      x = x.permute(0, 3, 1, 2)
-      batched = True
-    x = self.layers(x)
-    return x
-  
+        env.unwrapped.sample_random_amt += 1 # type: ignore
+        return torch.tensor([[env.action_space.sample()]], device=device, dtype=torch.long)
 
-class SnakeCNNCritic(nn.Module):
-  def __init__(self):
-    super(SnakeCNNCritic, self).__init__()
 
-    self.cnn_layers = nn.Sequential(
-      nn.Conv2d(1, 32, kernel_size=8, stride=4, padding=1, device=device), nn.ReLU(),
-      nn.LazyConv2d(64, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
-      # nn.MaxPool2d(kerHIP_LAUNCH_BLOCKING=1.nel_size=2, stride=2),
-      nn.LazyConv2d(128, kernel_size=3, stride=1, padding=1, device=device), nn.ReLU(),
-      # nn.MaxPool2d(kernel_size=2, stride=2),
-    )
+episode_durations = []
 
-    self.linear_layers = nn.Sequential(
-      # nn.LazyLinear(512, device=device), nn.ReLU(),
-      nn.LazyLinear(256, device=device), nn.ReLU(),
-      nn.LazyLinear(1, device=device),
-    )
 
-  def forward(self, x):
-    x = x.unsqueeze(-1)
-    batched = False
-    if len(x.shape) == 3:
-      x = x.permute(2, 0, 1)
+def plot_durations(show_result=True):
+    plt.figure(1)
+    durations_t = torch.tensor(episode_durations, dtype=torch.float)
+    if show_result:
+        plt.title('Result')
     else:
-      x = x.permute(0, 3, 1, 2)
-      batched = True
-    x = self.cnn_layers(x)
-    if not batched:
-      x = x.flatten()
-    else:
-      x = x.flatten(start_dim=1)
-    x = self.linear_layers(x)
-    return x
+        plt.clf()
+        plt.title('Training...')
+    plt.xlabel('Episode')
+    plt.ylabel('Duration')
+    plt.plot(durations_t.numpy())
+    # Take 100 episode averages and plot them too
+    if len(durations_t) >= 100:
+        means = durations_t.unfold(0, 100, 1).mean(1).view(-1)
+        means = torch.cat((torch.zeros(99), means))
+        plt.plot(means.numpy())
 
+    plt.pause(0.001)  # pause a bit so that plots are updated
 
-model = TensorDictModule(
-  SnakeCNNActor(),
-  in_keys = ["observation"],
-  out_keys = ["logits"],
-)
+def optimize_model():
+    if len(memory) < BATCH_SIZE:
+        return
+    transitions = memory.sample(BATCH_SIZE)
+    # Transpose the batch (see https://stackoverflow.com/a/19343/3343043 for
+    # detailed explanation). This converts batch-array of Transitions
+    # to Transition of batch-arrays.
+    batch = Transition(*zip(*transitions))
 
-value_module = ValueOperator(
-  SnakeCNNCritic(),
-  in_keys = ["observation"],
-)
+    # Compute a mask of non-final states and concatenate the batch elements
+    # (a final state would've been the one after which simulation ended)
+    non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
+                                          batch.next_state)), device=device, dtype=torch.bool)
+    non_final_next_states = torch.cat([s for s in batch.next_state
+                                                if s is not None])
+    state_batch = torch.cat(batch.state)
+    action_batch = torch.cat(batch.action)
+    reward_batch = torch.cat(batch.reward)
 
-policy_module = ProbabilisticActor(
-  model,
-  spec=env.action_spec,
-  in_keys=["logits"],
-  distribution_class=OneHotCategorical,
-  return_log_prob=True
-)
+    # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
+    # columns of actions taken. These are the actions which would've been taken
+    # for each batch state according to policy_net
+    state_action_values = policy_net(state_batch).gather(1, action_batch)
 
-policy_module(env.reset())
-value_module(env.reset())
-
-# print("normalization constant shape:", env.transform[0].loc.shape) # type: ignore
-
-# print("observation_spec:", env.observation_spec)
-# print("reward_spec:", env.reward_spec)
-# print("done_spec:", env.done_spec)
-# print("action_spec:", env.action_spec)
-# print("state_spec:", env.state_spec)
-
-collector = SyncDataCollector(
-    env,
-    policy_module,
-    frames_per_batch=hyp.frames_per_batch,
-    total_frames=hyp.total_frames,
-    device=device
-)
-
-replay_buffer = ReplayBuffer(
-    storage=LazyTensorStorage(collector.frames_per_batch),
-    sampler=SamplerWithoutReplacement(),
-)
-
-advantage_module = GAE(
-    gamma=hyp.gamma, lmbda=hyp.lmbda, value_network=value_module, average_gae=True
-)
-
-loss_module = ClipPPOLoss(
-    actor=policy_module,
-    critic=value_module,
-    clip_epsilon=hyp.clip_epsilon,
-    entropy_bonus=bool(hyp.entropy_eps),
-    entropy_coef=hyp.entropy_eps,
-    # these keys match by default but we set this for completeness
-    value_target_key=advantage_module.value_target_key,
-    critic_coef=1.0,
-    gamma=0.99,
-    loss_critic_type="smooth_l1",
-)
-
-optim = torch.optim.Adam(loss_module.parameters(), hyp.lr)
-scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-    optim, hyp.total_frames // hyp.frames_per_batch, 0.0
-)
-
-# now we can finally actually get some training done
-
-progress = tqdm(total=hyp.total_frames)
-logs = defaultdict(list)
-eval_str = ""
-
-writer = SummaryWriter()
-
-# collect each batch of frames
-for batch_num, tensordict_data in enumerate(collector):
-  for _ in range(hyp.num_epochs):
-    # update our advantage, without affecting training
+    # Compute V(s_{t+1}) for all next states.
+    # Expected values of actions for non_final_next_states are computed based
+    # on the "older" target_net; selecting their best reward with max(1).values
+    # This is merged based on the mask, such that we'll have either the expected
+    # state value or 0 in case the state was final.
+    next_state_values = torch.zeros(BATCH_SIZE, device=device)
     with torch.no_grad():
-      advantage_module(tensordict_data)
+        next_state_values[non_final_mask] = target_net(non_final_next_states).max(1).values
+    # Compute the expected Q values
+    expected_state_action_values = (next_state_values * GAMMA) + reward_batch
 
-    # i think this flattens the data, idk why they didn't just use .flatten edit: probably because of batching
-    data_view = tensordict_data.reshape(-1)
-    replay_buffer.extend(data_view.cpu()) # type: ignore , why pytorch why
-    for _ in range(hyp.frames_per_batch // hyp.sub_batch_size):
-      subdata = replay_buffer.sample(hyp.sub_batch_size)
-      loss_vals = loss_module(subdata.to(device))
-      loss_value = (
-        loss_vals["loss_objective"]
-        + loss_vals["loss_critic"]
-        + loss_vals["loss_entropy"]
-      )
-      loss_value.backward()
-      torch.nn.utils.clip_grad_norm_(loss_module.parameters(), hyp.max_grad_norm) # type: ignore this time because it's a private function
-      optim.step()
-      optim.zero_grad()
+    # Compute Huber loss
+    criterion = nn.SmoothL1Loss()
+    loss = criterion(state_action_values, expected_state_action_values.unsqueeze(1))
 
-    steps = tensordict_data.numel()
-    logs["reward"].append(tensordict_data["next", "reward"].mean().item()) # type: ignore
-    writer.add_scalar("reward", logs["reward"][-1], steps)
-    progress.update(steps)
-    cum_reward_str = (
-      f"average reward={logs['reward'][-1]: 4.4f} (init={logs['reward'][0]: 4.4f})"
-    )
-    logs["step_count"].append(tensordict_data["step_count"].max().item()) # type: ignore
-    writer.add_scalar("step_count", logs["step_count"][-1], steps)
-    stepcount_str = f"step count (max): {logs['step_count'][-1]}"
-    logs["lr"].append(optim.param_groups[0]["lr"])
-    writer.add_scalar("lr", logs["lr"][-1], steps)
-    lr_str = f"lr policy: {logs['lr'][-1]: 4.4f}"
+    # Optimize the model
+    optimizer.zero_grad()
+    loss.backward()
+    # In-place gradient clipping
+    torch.nn.utils.clip_grad_value_(policy_net.parameters(), 100)
+    optimizer.step()
 
-    if batch_num % 2 == 0:
-      #it's evaluation time
-      print("evaluating", batch_num)
-      with set_exploration_type(ExplorationType.MEAN), torch.no_grad():
-        eval_rollout = env.rollout(1000, policy_module)
-        env.base_env.render()
-        logs["eval reward"].append(eval_rollout["next", "reward"].mean().item()) # type: ignore
-        logs["eval reward (sum)"].append(
-            eval_rollout["next", "reward"].sum().item() # type: ignore
-        )
-        logs["eval step_count"].append(eval_rollout["step_count"].max().item()) # type: ignore
-        writer.add_scalar("eval reward", logs["eval reward"][-1], steps)
-        writer.add_scalar("eval reward (sum)", logs["eval reward (sum)"][-1], steps)
-        writer.add_scalar("eval step_count", logs["eval step_count"][-1], steps)
-        eval_str = (
-            f"eval cumulative reward: {logs['eval reward (sum)'][-1]: 4.4f} "
-            f"(init: {logs['eval reward (sum)'][0]: 4.4f}), "
-            f"eval step-count: {logs['eval step_count'][-1]}"
-        )
-        del eval_rollout
+num_episodes = 500
 
-    progress.set_description(", ".join([eval_str, cum_reward_str, stepcount_str, lr_str]))
-    scheduler.step()
+for i_episode in range(num_episodes):
+    # Initialize the environment and get it's state
+    state, info = env.reset()
+    state = torch.tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
+    for t in count():
+        action = select_action(state)
+        observation, reward, terminated, truncated, _ = env.step(action.item())
+        reward = torch.tensor([reward], device=device)
+        done = terminated or truncated
 
-progress.close()
-writer.close()
+        if terminated:
+            next_state = None
+        else:
+            next_state = torch.tensor(observation, dtype=torch.float32, device=device).unsqueeze(0)
 
+        # Store the transition in memory
+        memory.push(state, action, next_state, reward)
+
+        # Move to the next state
+        state = next_state
+
+        # Perform one step of the optimization (on the policy network)
+        optimize_model()
+
+        # Soft update of the target network's weights
+        # θ′ ← τ θ + (1 −τ )θ′
+        target_net_state_dict = target_net.state_dict()
+        policy_net_state_dict = policy_net.state_dict()
+        for key in policy_net_state_dict:
+            target_net_state_dict[key] = policy_net_state_dict[key]*TAU + target_net_state_dict[key]*(1-TAU)
+        target_net.load_state_dict(target_net_state_dict)
+
+        if done:
+            episode_durations.append(t + 1)
+            plot_durations()
+            break
+
+print('Complete')
+plot_durations(show_result=True)
+plt.ioff()
+plt.show()
