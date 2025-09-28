@@ -58,6 +58,7 @@ class SnakeRenderer():
                          (x_start, y_start)], # BL to TL
                          1)
     pygame.display.flip()
+    # pygame.time.wait(1)
 
 
 if __name__ == "__main__":

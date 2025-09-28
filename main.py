@@ -121,6 +121,7 @@ class SnakeCNNActor(nn.Module):
     )
 
   def forward(self, x):
+    x = x.to(dtype=torch.float)
     x = x.unsqueeze(-1)
     batched = False
     if len(x.shape) == 3:
@@ -151,6 +152,7 @@ class SnakeCNNCritic(nn.Module):
     )
 
   def forward(self, x):
+    x = x.to(dtype=torch.float)
     x = x.unsqueeze(-1)
     batched = False
     if len(x.shape) == 3:
@@ -223,7 +225,6 @@ loss_module = ClipPPOLoss(
     # these keys match by default but we set this for completeness
     value_target_key=advantage_module.value_target_key,
     critic_coef=1.0,
-    gamma=0.99,
     loss_critic_type="smooth_l1",
 )
 
